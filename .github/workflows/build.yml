@@ -25,9 +25,9 @@ jobs:
           submodules: false
 
       # ── 2. Clone godot-cpp ─────────────────────────────────────────────────
-      - name: Clone godot-cpp (4.x)
+      - name: Clone godot-cpp
         run: |
-          git clone --depth 1 -b 4.x https://github.com/godotengine/godot-cpp.git ../godot-cpp
+          git clone --depth 1 -b master https://github.com/godotengine/godot-cpp.git ../godot-cpp
           cd ../godot-cpp
           git submodule update --init --recursive
 
