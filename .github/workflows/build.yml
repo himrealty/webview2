@@ -9,7 +9,7 @@ on:
       - '.github/workflows/build.yml'
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # allows manual trigger from GitHub Actions tab
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -18,26 +18,22 @@ jobs:
 
     steps:
 
-      # ── 1. Checkout your repo ──────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      # ── 2. Clone godot-cpp ─────────────────────────────────────────────────
       - name: Clone godot-cpp
         run: |
           git clone --depth 1 -b master https://github.com/godotengine/godot-cpp.git ../godot-cpp
           cd ../godot-cpp
           git submodule update --init --recursive
 
-      # ── 3. Install NuGet + WebView2 + WIL ─────────────────────────────────
       - name: Install NuGet packages
         run: |
           nuget install Microsoft.Web.WebView2 -OutputDirectory packages -NonInteractive
           nuget install Microsoft.Windows.ImplementationLibrary -OutputDirectory packages -NonInteractive
 
-      # ── 4. Detect package paths ────────────────────────────────────────────
       - name: Detect package paths
         id: pkgpaths
         shell: pwsh
@@ -49,7 +45,6 @@ jobs:
           echo "WebView2: $wv2"
           echo "WIL:      $wil"
 
-      # ── 5. Configure CMake ─────────────────────────────────────────────────
       - name: Configure CMake
         run: |
           cmake -B build -G "Visual Studio 17 2022" -A x64 `
@@ -57,19 +52,19 @@ jobs:
             -DWEBVIEW2_PATH="${{ steps.pkgpaths.outputs.WEBVIEW2_PATH }}" `
             -DWIL_PATH="${{ steps.pkgpaths.outputs.WIL_PATH }}"
 
-      # ── 6. Build Release ───────────────────────────────────────────────────
       - name: Build Release
         run: cmake --build build --config Release --parallel
 
-      # ── 7. Copy DLL to output folder ───────────────────────────────────────
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist\addons\livekit_webview\bin
 
-          # DLL
-          Copy-Item "godot_addon\addons\livekit_webview\bin\webview_godot.dll" `
-                    "dist\addons\livekit_webview\bin\webview_godot.dll"
+          # Find DLL wherever CMake placed it
+          $dll = Get-ChildItem -Recurse -Filter "webview_godot.dll" | Select-Object -First 1
+          if (-not $dll) { Write-Error "DLL not found after build!"; exit 1 }
+          Write-Host "Found DLL: $($dll.FullName)"
+          Copy-Item $dll.FullName "dist\addons\livekit_webview\bin\webview_godot.dll"
 
           # GDScript + config files
           Copy-Item "godot_addon\addons\livekit_webview\plugin.cfg"               "dist\addons\livekit_webview\"
@@ -86,17 +81,15 @@ jobs:
           # README
           Copy-Item "README.md" "dist\"
 
-          echo "=== dist contents ==="
+          Write-Host "=== dist contents ==="
           Get-ChildItem -Recurse dist
 
-      # ── 8. Zip the full addon ──────────────────────────────────────────────
       - name: Zip addon
         shell: pwsh
         run: |
           Compress-Archive -Path dist\* -DestinationPath livekit_webview_addon.zip
-          echo "Size: $((Get-Item livekit_webview_addon.zip).Length / 1KB) KB"
+          Write-Host "Size: $((Get-Item livekit_webview_addon.zip).Length / 1KB) KB"
 
-      # ── 9. Upload as GitHub artifact (downloadable from Actions tab) ───────
       - name: Upload addon artifact
         uses: actions/upload-artifact@v4
         with:
@@ -104,7 +97,6 @@ jobs:
           path: livekit_webview_addon.zip
           retention-days: 30
 
-      # ── 10. Also create a GitHub Release on version tags (e.g. v1.0.0) ─────
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
