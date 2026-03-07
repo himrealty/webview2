@@ -1,0 +1,113 @@
+name: Build WebView2 GDExtension
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'src/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # allows manual trigger from GitHub Actions tab
+
+jobs:
+  build-windows:
+    name: Build Windows DLL
+    runs-on: windows-latest
+
+    steps:
+
+      # ── 1. Checkout your repo ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # ── 2. Clone godot-cpp ─────────────────────────────────────────────────
+      - name: Clone godot-cpp (4.x)
+        run: |
+          git clone --depth 1 -b 4.x https://github.com/godotengine/godot-cpp.git ../godot-cpp
+          cd ../godot-cpp
+          git submodule update --init --recursive
+
+      # ── 3. Install NuGet + WebView2 + WIL ─────────────────────────────────
+      - name: Install NuGet packages
+        run: |
+          nuget install Microsoft.Web.WebView2 -OutputDirectory packages -NonInteractive
+          nuget install Microsoft.Windows.ImplementationLibrary -OutputDirectory packages -NonInteractive
+
+      # ── 4. Detect package paths ────────────────────────────────────────────
+      - name: Detect package paths
+        id: pkgpaths
+        shell: pwsh
+        run: |
+          $wv2 = (Get-ChildItem -Path packages -Filter "Microsoft.Web.WebView2.*" -Directory | Select-Object -First 1).FullName
+          $wil = (Get-ChildItem -Path packages -Filter "Microsoft.Windows.ImplementationLibrary.*" -Directory | Select-Object -First 1).FullName
+          echo "WEBVIEW2_PATH=$wv2" >> $env:GITHUB_OUTPUT
+          echo "WIL_PATH=$wil"      >> $env:GITHUB_OUTPUT
+          echo "WebView2: $wv2"
+          echo "WIL:      $wil"
+
+      # ── 5. Configure CMake ─────────────────────────────────────────────────
+      - name: Configure CMake
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DGODOT_CPP_PATH="${{ github.workspace }}/../godot-cpp" `
+            -DWEBVIEW2_PATH="${{ steps.pkgpaths.outputs.WEBVIEW2_PATH }}" `
+            -DWIL_PATH="${{ steps.pkgpaths.outputs.WIL_PATH }}"
+
+      # ── 6. Build Release ───────────────────────────────────────────────────
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      # ── 7. Copy DLL to output folder ───────────────────────────────────────
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\addons\livekit_webview\bin
+
+          # DLL
+          Copy-Item "godot_addon\addons\livekit_webview\bin\webview_godot.dll" `
+                    "dist\addons\livekit_webview\bin\webview_godot.dll"
+
+          # GDScript + config files
+          Copy-Item "godot_addon\addons\livekit_webview\plugin.cfg"               "dist\addons\livekit_webview\"
+          Copy-Item "godot_addon\addons\livekit_webview\plugin.gd"                "dist\addons\livekit_webview\"
+          Copy-Item "godot_addon\addons\livekit_webview\webview_godot.gdextension" "dist\addons\livekit_webview\"
+          Copy-Item "godot_addon\addons\livekit_webview\LiveKitManager.gd"         "dist\addons\livekit_webview\"
+          Copy-Item "godot_addon\addons\livekit_webview\LiveKitAPI.gd"             "dist\addons\livekit_webview\"
+          Copy-Item "godot_addon\addons\livekit_webview\example_usage.gd"          "dist\addons\livekit_webview\"
+
+          # HTML page
+          New-Item -ItemType Directory -Force -Path dist\addons\livekit_webview\html
+          Copy-Item "html\livekit.html" "dist\addons\livekit_webview\html\livekit.html"
+
+          # README
+          Copy-Item "README.md" "dist\"
+
+          echo "=== dist contents ==="
+          Get-ChildItem -Recurse dist
+
+      # ── 8. Zip the full addon ──────────────────────────────────────────────
+      - name: Zip addon
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\* -DestinationPath livekit_webview_addon.zip
+          echo "Size: $((Get-Item livekit_webview_addon.zip).Length / 1KB) KB"
+
+      # ── 9. Upload as GitHub artifact (downloadable from Actions tab) ───────
+      - name: Upload addon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: livekit_webview_addon_windows
+          path: livekit_webview_addon.zip
+          retention-days: 30
+
+      # ── 10. Also create a GitHub Release on version tags (e.g. v1.0.0) ─────
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: livekit_webview_addon.zip
+          generate_release_notes: true
