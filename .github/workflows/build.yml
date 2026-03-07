@@ -25,7 +25,7 @@ jobs:
 
       - name: Clone godot-cpp
         run: |
-          git clone --depth 1 -b master https://github.com/godotengine/godot-cpp.git ../godot-cpp
+          git clone --depth 1 -b godot-4.4.1-stable https://github.com/godotengine/godot-cpp.git ../godot-cpp
           cd ../godot-cpp
           git submodule update --init --recursive
 
@@ -60,11 +60,20 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist\addons\livekit_webview\bin
 
-          # Find DLL wherever CMake placed it
+          # Find and copy main DLL
           $dll = Get-ChildItem -Recurse -Filter "webview_godot.dll" | Select-Object -First 1
-          if (-not $dll) { Write-Error "DLL not found after build!"; exit 1 }
+          if (-not $dll) { Write-Error "webview_godot.dll not found!"; exit 1 }
           Write-Host "Found DLL: $($dll.FullName)"
           Copy-Item $dll.FullName "dist\addons\livekit_webview\bin\webview_godot.dll"
+
+          # Find and copy WebView2Loader.dll from NuGet package
+          $wv2loader = Get-ChildItem -Path "${{ steps.pkgpaths.outputs.WEBVIEW2_PATH }}" -Recurse -Filter "WebView2Loader.dll" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+          if ($wv2loader) {
+            Write-Host "Found WebView2Loader.dll: $($wv2loader.FullName)"
+            Copy-Item $wv2loader.FullName "dist\addons\livekit_webview\bin\WebView2Loader.dll"
+          } else {
+            Write-Warning "WebView2Loader.dll not found in NuGet package"
+          }
 
           # GDScript + config files
           Copy-Item "godot_addon\addons\livekit_webview\plugin.cfg"               "dist\addons\livekit_webview\"
