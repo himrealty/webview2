@@ -66,7 +66,7 @@ void WebViewWindow::_ready() {
 
     // Get the native HWND from Godot's DisplayServer
     godot_hwnd = (HWND)(INT_PTR)DisplayServer::get_singleton()->window_get_native_handle(
-        DisplayServer::HANDLE_TYPE_WINDOW_HANDLE, 0);
+        DisplayServer::WindowHandleType::WINDOW_HANDLE, 0);
 
     if (!godot_hwnd) {
         UtilityFunctions::printerr("[WebView] Failed to get native HWND");
